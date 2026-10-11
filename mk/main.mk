@@ -5,7 +5,7 @@ $(BUILD)/clips: $(BUILD)/main.o $(OBJS) | $(BUILD)
 	$(CC) $(CFLAGS) -o $@ $(BUILD)/main.o $(OBJS) $(LIBS)
 
 $(BUILD)/test_e2e: tests/test_e2e.c | $(BUILD)
-	$(CC) $(CFLAGS) -o $@ tests/test_e2e.c
+	$(CC) $(CFLAGS) -DTEST_FFPROBE='"$(AUDIO_FFMPEG)/bin/ffprobe"' -o $@ tests/test_e2e.c
 
 check-e2e: fixtures/talk.mp4 $(BUILD)/clips $(BUILD)/test_e2e
 	$(BUILD)/test_e2e

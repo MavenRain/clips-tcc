@@ -3,11 +3,16 @@
  * (pauses over 0.3 s are cut), the durations sum to at most materialSec, input is the absolute path.
  * Run from the repo root, unsandboxed. */
 #include <stdarg.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #define CMD "build/clips fixtures/talk.mp4 --json 2>build/e2e.stderr"
+#ifndef TEST_FFPROBE
+#define TEST_FFPROBE "/opt/homebrew/opt/ffmpeg-full/bin/ffprobe"
+#endif
+#define PROBE_CMD TEST_FFPROBE " -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 fixtures/talk.mp4"
 #define EPS 1e-9 /* touching ranges share an end point */
 
 enum { CAP = 64, MAX_SPANS = 8, MAX_DEPTH = 64, PATH_LEN = 4096 };
@@ -244,8 +249,19 @@ int main(void)
 
     check(status == 0, "clips exits 0 (status %d, stderr in build/e2e.stderr)", status);
     check(report(&c, s, CAP, &n, &material, input) == 0, "--json output parses as a ClipReport with a clips array");
-    /* talk.mp4: container 94.0 s, AAC track 92.15 s; the CLI reports the container. */
-    check(material > 93.99 && material < 94.01, "materialSec %.3f is the 94 s container duration", material);
+    /* Speech synthesis can change the fixture length. Probe the container independently. */
+    char *meta = NULL;
+    size_t meta_len = 0;
+    double expected = -1;
+    int probe_status = capture(PROBE_CMD, &meta, &meta_len);
+    cur m = { meta ? meta : "" };
+    int parsed = num(&m, &expected);
+    ws(&m);
+    check(probe_status == 0 && parsed == 0 && !*m.p && expected > 0 && isfinite(expected),
+          "ffprobe supplies a positive container duration (status %d)", probe_status);
+    check(material > expected - 0.01 && material < expected + 0.01,
+          "materialSec %.3f matches the %.3f s container duration", material, expected);
+    free(meta);
     check(realpath("fixtures/talk.mp4", want) && !strcmp(input, want), "input \"%s\" is the absolute path", input);
     check(n >= 1, "at least one span (got %d)", n);
     check(n <= MAX_SPANS, "at most %d spans (got %d)", MAX_SPANS, n);

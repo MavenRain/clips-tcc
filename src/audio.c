@@ -46,7 +46,7 @@ static int fbuf_reserve(fbuf *b, size_t extra)
 /* Build the resampler for frame f (its layout, format and rate are authoritative). */
 static int swr_open(dstate *d, const AVFrame *f)
 {
-    AVChannelLayout mono, in;
+    AVChannelLayout mono = {0}, in = {0};
     av_channel_layout_uninit(&d->in_layout);
     if (av_channel_layout_copy(&d->in_layout, &f->ch_layout) < 0) return -1;
     d->in_rate = f->sample_rate;
@@ -167,12 +167,31 @@ static const char *decode_all(AVFormatContext *fmt, int si, dstate *d)
     return r < 0 ? "resampler flush failed" : NULL;
 }
 
+/* Probe the container timeline with fill-in, then discard synthesized parser timestamps for TS.
+ * AAC inside one PES can change rate; fill-in still uses the stream's original rate between PES
+ * timestamps. A fresh demuxer retains stored timestamps without keeping the probe's filled queue. */
+static int stream_info(const char *path, AVFormatContext **fmt, double *media, int64_t *start)
+{
+    if (avformat_find_stream_info(*fmt, NULL) < 0) return -1;
+    *start = (*fmt)->start_time;
+    if ((*fmt)->duration > 0 && (*fmt)->duration_estimation_method != AVFMT_DURATION_FROM_BITRATE)
+        *media = (double)(*fmt)->duration / AV_TIME_BASE;
+    if (!strcmp((*fmt)->iformat->name, "mpegts")) {
+        avformat_close_input(fmt);
+        if (avformat_open_input(fmt, path, NULL, NULL) < 0) return -1;
+        (*fmt)->flags |= AVFMT_FLAG_NOFILLIN;
+        if (avformat_find_stream_info(*fmt, NULL) < 0) return -1;
+    }
+    return 0;
+}
+
 int audio_load(const char *path, float **pcm, size_t *n, double *media_sec)
 {
     AVFormatContext *fmt = NULL;
     dstate d = {0};
     const char *err = NULL;
     double media = -1;
+    int64_t start = AV_NOPTS_VALUE;
     int si;
 
     *pcm = NULL;
@@ -180,19 +199,19 @@ int audio_load(const char *path, float **pcm, size_t *n, double *media_sec)
     if (media_sec) *media_sec = 0;
     av_log_set_level(AV_LOG_ERROR);
     if (avformat_open_input(&fmt, path, NULL, NULL) < 0) return fail(path, "cannot open");
-    /* Keep stored timestamps. Inferred raw-audio timestamps can use the initial sample rate
-     * after a rate change and would make drain() insert silence that is absent from the input. */
-    fmt->flags |= AVFMT_FLAG_NOFILLIN;
-    if (avformat_find_stream_info(fmt, NULL) < 0) err = "no stream info";
+    /* Raw AAC (ADTS, LOAS) stores no timestamps, and libav infers them with the first sample rate
+     * after a rate change, so drain() would insert silence that is absent from the input. Other
+     * demuxers keep the fill-in: MPEG-TS needs it for start_time, MP3 for its priming trim. */
+    if (!strcmp(fmt->iformat->name, "aac") || !strcmp(fmt->iformat->name, "loas"))
+        fmt->flags |= AVFMT_FLAG_NOFILLIN;
+    if (stream_info(path, &fmt, &media, &start) < 0) err = "no stream info";
     else if ((si = open_decoder(fmt, &d)) < 0) err = "no decodable audio stream";
     else if (!(d.fr = av_frame_alloc())) err = "out of memory";
     else {
         /* The CLI's material length: the whole container, not the audio track. */
-        if (fmt->duration > 0 && fmt->duration_estimation_method != AVFMT_DURATION_FROM_BITRATE)
-            media = (double)fmt->duration / AV_TIME_BASE;
         d.time_base = fmt->streams[si]->time_base;
-        d.origin_samples = fmt->start_time == AV_NOPTS_VALUE ? 0
-            : av_rescale_q(fmt->start_time, (AVRational){1, AV_TIME_BASE},
+        d.origin_samples = start == AV_NOPTS_VALUE ? 0
+            : av_rescale_q(start, (AVRational){1, AV_TIME_BASE},
                            (AVRational){1, AUDIO_RATE});
         err = decode_all(fmt, si, &d);
     }

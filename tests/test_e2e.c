@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #define CMD "build/clips fixtures/talk.mp4 --json 2>build/e2e.stderr"
 #ifndef TEST_FFPROBE
@@ -262,7 +263,10 @@ int main(void)
     check(material > expected - 0.01 && material < expected + 0.01,
           "materialSec %.3f matches the %.3f s container duration", material, expected);
     free(meta);
-    check(realpath("fixtures/talk.mp4", want) && !strcmp(input, want), "input \"%s\" is the absolute path", input);
+    /* The CLI appends a relative argv to the cwd without resolving symlinks. */
+    check(getcwd(want, sizeof want) && strlen(want) + sizeof "/fixtures/talk.mp4" <= sizeof want
+              && !strcmp(input, strcat(want, "/fixtures/talk.mp4")),
+          "input \"%s\" is the cwd plus the argv path", input);
     check(n >= 1, "at least one span (got %d)", n);
     check(n <= MAX_SPANS, "at most %d spans (got %d)", MAX_SPANS, n);
     for (int i = 0; i < n; i++) check_span(&s[i], i);

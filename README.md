@@ -48,16 +48,16 @@ Run `build/clips` outside the sandbox. Core ML writes a model cache. Progress me
 
 `make check` runs six gates. Run them from the repository root, outside the sandbox. If `fixtures/talk.mp4` is absent, the first run makes it from `fixtures/talk.txt` with `say` and ffmpeg. The E2E gate compares `materialSec` with the container duration reported independently by ffprobe.
 
-The table records the S4 run on the original fixture. Speech synthesis and ASR can vary by machine, so regenerated fixtures can have different durations and sentence counts. After the duration-gate fix, E2E performs 119 checks for 8 spans.
+The table records the S5 run on the original fixture. Speech synthesis and ASR can vary by machine, so regenerated fixtures can have different durations and sentence counts.
 
-| Gate | What it checks | Result at S4 |
+| Gate | What it checks | Result at S5 |
 | --- | --- | --- |
 | `check-coreml` | Model load, input widths and pinned outputs with units 3 | 14 passed, 0 failed |
 | `check-tokenizer` | The tokenizer | 50 passed, 0 failed |
-| `check-audio` | Decode timelines: delays, gaps, layout and rate changes | 7 scenarios, 0 failed |
+| `check-audio` | Decode timelines: delays, gaps, MPEG-TS and MP3 timestamps, AC3 layout copies and rate changes | 12 scenarios, 0 failed |
 | `check-words` | Words and sentences of `fixtures/talk.mp4` | OK, 307 words, 38 sentences |
 | `check-pipeline` | Clip selection | 53 checks, 0 failed |
-| `check-e2e` | `build/clips fixtures/talk.mp4 --json` | 8 spans, 118 checks, 0 failed |
+| `check-e2e` | `build/clips fixtures/talk.mp4 --json` | 8 spans, 119 checks, 0 failed |
 
 ## JSON output and `da clips --json`
 
@@ -66,7 +66,7 @@ The table records the S4 run on the original fixture. Speech synthesis and ASR c
 - Added: `sentenceIDs` in each clip. It gives the sentence ids of the clip.
 - Left out: `transcript` and `Pick.file`. The tool does not cut clip files.
 - `cutSec` is always 0, because the tool does not cut clips.
-- `input` uses `realpath`, resolving symlinks to their targets. The CLI reports the absolute input path without resolving symlinks. If `realpath` fails, this tool keeps the argument as given.
+- `input` uses the same rule as the CLI. An absolute argument stays as given. A relative argument is appended to the working directory, and its `.` and `..` segments are removed. Symlinks are not resolved. If the working directory cannot be read, this tool keeps the argument as given.
 - `transcribeSec` and `selectSec` measure each run and are not parity fields. In the selection oracle, the CLI uses a supplied transcript and reports `transcribeSec` as 0.
 
 ## Oracle result

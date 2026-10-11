@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 
 #include "audio.h"
 #include "coreml.h"
@@ -180,10 +181,41 @@ static void print_text(const state *st)
     if (!st->n_clips) fprintf(stderr, "clips: no clips\n");
 }
 
+/* URL(fileURLWithPath:).path as the CLI reports it (ClipsRunner.swift:28): an absolute argv as given,
+ * a relative one appended to the cwd with its "." and ".." segments removed (RFC 3986 5.2.4).
+ * Symlinks stay unresolved. Returns 0, or -1 when getcwd fails or the result is too long. */
+static int input_path(const char *video, char *out)
+{
+    if (video[0] == '/') return snprintf(out, PATH_LEN, "%s", video) < PATH_LEN ? 0 : -1;
+    if (!getcwd(out, PATH_LEN)) return -1;
+    size_t n = strlen(out) == 1 ? 0 : strlen(out); /* cwd "/": each segment adds its own slash */
+    const char *s = video;
+    int dir = 0; /* the last segment is "." or "..", so the result keeps a trailing slash */
+    for (;;) {
+        size_t k = strcspn(s, "/");
+        int dot = k == 1 && s[0] == '.';
+        int dots = k == 2 && s[0] == '.' && s[1] == '.';
+        while (dots && n > 0 && out[n - 1] != '/') n--;
+        if (dots && n > 0) n--;
+        if (!dot && !dots) {
+            if (n + k + 2 >= PATH_LEN) return -1;
+            out[n++] = '/';
+            memcpy(out + n, s, k);
+            n += k;
+        }
+        dir = dot || dots;
+        if (!s[k]) break;
+        s += k + 1;
+    }
+    if (dir || n == 0) out[n++] = '/';
+    out[n] = '\0';
+    return 0;
+}
+
 /* ClipReport (ClipPipeline.swift:20-29) as JSONEncoder [.prettyPrinted, .sortedKeys] writes it.
  * Additions: Pick.sentenceIDs (the clip's sentence ids). Omitted: transcript, Pick.file (no cut).
  * materialSec is the container duration, as the CLI reports it (talk.mp4: 94 s, audio track 92.15 s).
- * input is the absolute path (realpath of argv), as the CLI reports it; argv as given if that fails. */
+ * input is the argv path made absolute as the CLI does it (input_path); argv as given if that fails. */
 static void print_json(const args *a, const state *st)
 {
     char abs[PATH_LEN];
@@ -207,7 +239,7 @@ static void print_json(const args *a, const state *st)
         printf("\n    }%s\n", i + 1 < st->n_clips ? "," : "");
     }
     printf("  ],\n  \"cutSec\" : 0,\n  \"input\" : ");
-    put_str(realpath(a->video, abs) ? abs : a->video);
+    put_str(input_path(a->video, abs) ? a->video : abs);
     printf(",\n  \"materialSec\" : ");
     put_num(st->material_sec);
     printf(",\n  \"selectSec\" : ");

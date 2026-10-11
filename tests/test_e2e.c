@@ -1,5 +1,7 @@
 /* Stage 5 gate: build/clips on fixtures/talk.mp4 with --json. At most 8 spans, best first,
- * no two spans overlap in time or sentence ids, every start < end. Run from the repo root, unsandboxed. */
+ * no two spans overlap in time or sentence ids, every start < end, 0 < durationSec <= end - start
+ * (pauses over 0.3 s are cut), the durations sum to at most materialSec, input is the absolute path.
+ * Run from the repo root, unsandboxed. */
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -8,11 +10,11 @@
 #define CMD "build/clips fixtures/talk.mp4 --json 2>build/e2e.stderr"
 #define EPS 1e-9 /* touching ranges share an end point */
 
-enum { CAP = 64, MAX_SPANS = 8, MAX_DEPTH = 64 };
-enum { F_START = 1, F_END = 2, F_SCORE = 4, F_ID = 8, F_IDS = 16, F_TEXT = 32, F_ALL = 63 };
+enum { CAP = 64, MAX_SPANS = 8, MAX_DEPTH = 64, PATH_LEN = 4096 };
+enum { F_START = 1, F_END = 2, F_SCORE = 4, F_ID = 8, F_IDS = 16, F_TEXT = 32, F_DUR = 64, F_ALL = 127 };
 
 typedef struct { const char *p; } cur;
-typedef struct { double start, end, score, id, lo, hi; int n_ids, text_len; } span;
+typedef struct { double start, end, score, id, lo, hi, dur; int n_ids, text_len; } span;
 
 static int checks, failed;
 
@@ -155,6 +157,7 @@ static int field(cur *c, span *s, const char *key, int *seen)
 {
     if (!strcmp(key, "start")) return *seen |= F_START, num(c, &s->start);
     if (!strcmp(key, "end")) return *seen |= F_END, num(c, &s->end);
+    if (!strcmp(key, "durationSec")) return *seen |= F_DUR, num(c, &s->dur);
     if (!strcmp(key, "score")) return *seen |= F_SCORE, num(c, &s->score);
     if (!strcmp(key, "id")) return *seen |= F_ID, num(c, &s->id);
     if (!strcmp(key, "sentenceIDs")) return *seen |= F_IDS, ids(c, s);
@@ -187,8 +190,8 @@ static int clips(cur *c, span *out, int cap, int *count)
     return eat(c, ']') ? 0 : -1;
 }
 
-/* The ClipReport object; only "clips" and "materialSec" are read, the rest is skipped. */
-static int report(cur *c, span *out, int cap, int *count, double *material)
+/* The ClipReport object; only "clips", "materialSec" and "input" are read, the rest is skipped. */
+static int report(cur *c, span *out, int cap, int *count, double *material, char *input)
 {
     char key[32];
     *count = -1;
@@ -196,7 +199,8 @@ static int report(cur *c, span *out, int cap, int *count, double *material)
     do {
         if (str(c, key, sizeof key, NULL) || !eat(c, ':')) return -1;
         int r = !strcmp(key, "clips") ? clips(c, out, cap, count)
-              : !strcmp(key, "materialSec") ? num(c, material) : skip(c, 1);
+              : !strcmp(key, "materialSec") ? num(c, material)
+              : !strcmp(key, "input") ? str(c, input, PATH_LEN, NULL) : skip(c, 1);
         if (r) return -1;
     } while (eat(c, ','));
     if (!eat(c, '}')) return -1;
@@ -213,6 +217,8 @@ static void check_span(const span *s, int i)
     check(s->id == i + 1, "span %d: id %.0f is its rank", i + 1, s->id);
     check(s->n_ids > 0 && s->lo <= s->hi, "span %d: has sentence ids", i + 1);
     check(s->text_len > 0, "span %d: has text", i + 1);
+    check(s->dur > 0 && s->dur <= s->end - s->start + EPS, "span %d: durationSec %.3f in (0, end - start %.3f]", i + 1,
+          s->dur, s->end - s->start);
 }
 
 static void check_pair(const span *a, const span *b, int i, int j)
@@ -231,17 +237,21 @@ int main(void)
     size_t len = 0;
     span s[CAP];
     int n = -1;
-    double material = -1;
+    double material = -1, total = 0;
+    char input[PATH_LEN] = "", want[PATH_LEN];
     int status = capture(CMD, &buf, &len);
     cur c = { buf ? buf : "" };
 
     check(status == 0, "clips exits 0 (status %d, stderr in build/e2e.stderr)", status);
-    check(report(&c, s, CAP, &n, &material) == 0, "--json output parses as a ClipReport with a clips array");
+    check(report(&c, s, CAP, &n, &material, input) == 0, "--json output parses as a ClipReport with a clips array");
     /* talk.mp4: container 94.0 s, AAC track 92.15 s; the CLI reports the container. */
     check(material > 93.99 && material < 94.01, "materialSec %.3f is the 94 s container duration", material);
+    check(realpath("fixtures/talk.mp4", want) && !strcmp(input, want), "input \"%s\" is the absolute path", input);
     check(n >= 1, "at least one span (got %d)", n);
     check(n <= MAX_SPANS, "at most %d spans (got %d)", MAX_SPANS, n);
     for (int i = 0; i < n; i++) check_span(&s[i], i);
+    for (int i = 0; i < n; i++) total += s[i].dur;
+    check(total <= material + EPS, "durationSec sum %.3f <= materialSec %.3f", total, material);
     for (int i = 1; i < n; i++)
         check(s[i - 1].score >= s[i].score, "score order: span %d %.4f >= span %d %.4f", i, s[i - 1].score, i + 1,
               s[i].score);

@@ -15,7 +15,7 @@ static int passed, failed;
 static const int32_t ROW[5] = { 0, 35378, 8999, 38, 2 };
 static const float ZERO[CML_DISC] = { 0, 0, 0, 0, 0 }, CUE[CML_DISC] = { 0.5f, 1, 0, 1, 0.1f };
 static const char *const SEL_OUT[3] = { "saliency", "start_p", "end_p" };
-static const float SEL_WANT[2][3] = { { 0.71680f, 0.95752f, 0.07666f }, { 0.75439f, 0.91113f, 0.65186f } };
+static const float SEL_WANT[2][3] = { { 0.71680f, 0.95752f, 0.07666f }, { 0.75439f, 0.91113f, 0.64941f } };
 static const char *const SCORE_OUT[1] = { "score" };
 static const float SCORE_WANT = 0.03741f;
 
@@ -109,10 +109,10 @@ static void run(cml_model *sel, cml_model *sc, long w1, long w2) {
 
 int main(void) {
     check(cml_init() == 0, "cml_init");
-    check(cml_load("models/missing.mlmodelc", "select", 2) == NULL, "missing model loads as NULL (expected stderr)");
-    cml_model *sel = cml_load(MODEL, "select", 2), *sc = cml_load(MODEL, "score", 2);
-    check(sel != NULL, "load select, units 2");
-    check(sc != NULL, "load score, units 2");
+    check(cml_load("models/missing.mlmodelc", "select", 3) == NULL, "missing model loads as NULL (expected stderr)");
+    cml_model *sel = cml_load(MODEL, "select", 3), *sc = cml_load(MODEL, "score", 3);
+    check(sel != NULL, "load select, units 3");
+    check(sc != NULL, "load score, units 3");
     long w1 = cml_width(sel, 0), w2 = cml_width(sc, 0);
     check(w1 == 128, "cml_width select == 128");
     check(w2 == 256, "cml_width score == 256");

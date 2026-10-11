@@ -14,7 +14,7 @@
 #include "tokenizer.h"
 #include "words.h"
 
-enum { UNITS_ALL = 2, PATH_LEN = 4096, LIMIT_MAX = 1000 };
+enum { UNITS_CPU_ANE = 3, PATH_LEN = 4096, LIMIT_MAX = 1000 }; /* units: the SDK default .cpuAndNeuralEngine */
 #define PADDING 0.15 /* SPEC 7.3 default padding, seconds */
 
 typedef struct { const char *video, *models; int limit, json; } args;
@@ -182,9 +182,11 @@ static void print_text(const state *st)
 
 /* ClipReport (ClipPipeline.swift:20-29) as JSONEncoder [.prettyPrinted, .sortedKeys] writes it.
  * Additions: Pick.sentenceIDs (the clip's sentence ids). Omitted: transcript, Pick.file (no cut).
- * materialSec is the container duration, as the CLI reports it (talk.mp4: 94 s, audio track 92.15 s). */
+ * materialSec is the container duration, as the CLI reports it (talk.mp4: 94 s, audio track 92.15 s).
+ * input is the absolute path (realpath of argv), as the CLI reports it; argv as given if that fails. */
 static void print_json(const args *a, const state *st)
 {
+    char abs[PATH_LEN];
     printf("{\n  \"clips\" : [\n");
     if (!st->n_clips) printf("\n");
     for (int i = 0; i < st->n_clips; i++) {
@@ -205,7 +207,7 @@ static void print_json(const args *a, const state *st)
         printf("\n    }%s\n", i + 1 < st->n_clips ? "," : "");
     }
     printf("  ],\n  \"cutSec\" : 0,\n  \"input\" : ");
-    put_str(a->video);
+    put_str(realpath(a->video, abs) ? abs : a->video);
     printf(",\n  \"materialSec\" : ");
     put_num(st->material_sec);
     printf(",\n  \"selectSec\" : ");
@@ -238,9 +240,9 @@ static int run(const args *a, const paths *p, state *st)
 
     double t1 = now();
     if (cml_init()) return 1;
-    st->select = cml_load(p->model, "select", UNITS_ALL);
+    st->select = cml_load(p->model, "select", UNITS_CPU_ANE);
     if (!st->select) return 1;
-    st->score = cml_load(p->model, "score", UNITS_ALL);
+    st->score = cml_load(p->model, "score", UNITS_CPU_ANE);
     if (!st->score) return 1;
     st->tok = tok_load(p->vocab);
     if (!st->tok) {

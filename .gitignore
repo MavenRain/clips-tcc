@@ -1,0 +1,4 @@
+/models/
+build/
+/fixtures/*.aiff
+/fixtures/*.mp4

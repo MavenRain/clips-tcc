@@ -1,0 +1,11 @@
+Welcome back to the show. Today we are talking about why small models on your phone beat giant models in the cloud. Here is the secret nobody tells you. The cheapest inference is the inference that never leaves your device. Think about that for a second. Every request to a data center costs money, energy, and time. So what happens when the model fits in your pocket? You stop paying per request. You stop waiting on the network. And your users stop worrying about where their data goes.
+
+Let me give you a number. A ten minute video becomes a dozen clips in about five seconds on a phone. That is not a typo. Now compare that with uploading the same file to a server. You wait for the upload, you wait in a queue, and then you pay for the compute. Why would anyone choose that path?
+
+The honest answer is habit. Teams reach for the biggest model because it feels safe. But bigger is not always better. A focused model trained on one task often wins on that task. It is faster, it is cheaper, and it is easier to test.
+
+Here is the part that surprised me most. Our best clips were not the loudest moments. They were the moments where the speaker set up a question and then paid it off a few sentences later. That pattern shows up again and again. A hook, a short build, and then a payoff.
+
+So my advice is simple. Measure the task you actually care about. Pick the smallest model that clears the bar. Ship it on device. And keep your cloud budget for the problems that truly need it.
+
+That is all for today. If this changed how you think about models, share it with one friend. Thanks for listening, and see you next week.

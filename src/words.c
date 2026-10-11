@@ -152,7 +152,9 @@ int words_transcribe(const char *model_path, const float *pcm, size_t n, cw_word
     whisper_log_set(quiet_log, NULL);
     /* Homebrew ggml loads its backends (CPU, Metal) dynamically; without them init aborts. */
     if (ggml_backend_dev_count() == 0) ggml_backend_load_all();
-    /* CPU only: a Metal buffer allocation that fails (sandbox, no GPU) aborts inside ggml instead of returning NULL. */
+    /* CPU only: a Metal buffer allocation that fails (sandbox, no GPU) aborts inside ggml instead of returning NULL.
+     * Unsandboxed Metal (whisper 1.9.5, ggml 0.26) aborts too, in whisper_init_state: "pre-allocated tensor
+     * (leaf_0) in a buffer (MTL0) that cannot run the operation". */
     struct whisper_context_params cp = whisper_context_default_params();
     cp.use_gpu = false;
     struct whisper_context *ctx = whisper_init_from_file_with_params(model_path, cp);

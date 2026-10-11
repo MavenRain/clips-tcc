@@ -187,15 +187,17 @@ static int clips(cur *c, span *out, int cap, int *count)
     return eat(c, ']') ? 0 : -1;
 }
 
-/* The ClipReport object; only "clips" is read, the rest is skipped. */
-static int report(cur *c, span *out, int cap, int *count)
+/* The ClipReport object; only "clips" and "materialSec" are read, the rest is skipped. */
+static int report(cur *c, span *out, int cap, int *count, double *material)
 {
     char key[32];
     *count = -1;
     if (!eat(c, '{') || eat(c, '}')) return -1;
     do {
         if (str(c, key, sizeof key, NULL) || !eat(c, ':')) return -1;
-        if (strcmp(key, "clips") ? skip(c, 1) : clips(c, out, cap, count)) return -1;
+        int r = !strcmp(key, "clips") ? clips(c, out, cap, count)
+              : !strcmp(key, "materialSec") ? num(c, material) : skip(c, 1);
+        if (r) return -1;
     } while (eat(c, ','));
     if (!eat(c, '}')) return -1;
     ws(c);
@@ -229,11 +231,14 @@ int main(void)
     size_t len = 0;
     span s[CAP];
     int n = -1;
+    double material = -1;
     int status = capture(CMD, &buf, &len);
     cur c = { buf ? buf : "" };
 
     check(status == 0, "clips exits 0 (status %d, stderr in build/e2e.stderr)", status);
-    check(report(&c, s, CAP, &n) == 0, "--json output parses as a ClipReport with a clips array");
+    check(report(&c, s, CAP, &n, &material) == 0, "--json output parses as a ClipReport with a clips array");
+    /* talk.mp4: container 94.0 s, AAC track 92.15 s; the CLI reports the container. */
+    check(material > 93.99 && material < 94.01, "materialSec %.3f is the 94 s container duration", material);
     check(n >= 1, "at least one span (got %d)", n);
     check(n <= MAX_SPANS, "at most %d spans (got %d)", MAX_SPANS, n);
     for (int i = 0; i < n; i++) check_span(&s[i], i);

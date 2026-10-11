@@ -123,7 +123,8 @@ static void fixture(void)
     cw_sentence *s = NULL;
     double adur = -1, dur = container_seconds(VIDEO, &adur);
 
-    if (audio_load(VIDEO, &pcm, &n) != 0) {
+    double media = -1;
+    if (audio_load(VIDEO, &pcm, &n, &media) != 0) {
         CHECK(0, "audio_load failed");
         return;
     }
@@ -132,6 +133,7 @@ static void fixture(void)
     printf("audio: %zu samples = %.3f s, container %.3f s, audio stream %.3f s\n", n, secs, dur, adur);
     CHECK(adur > 0 && fabs(secs - adur) <= 0.5, "decoded %.3f s vs audio stream %.3f s", secs, adur);
     CHECK(dur > 0 && secs <= dur + 0.5, "decoded %.3f s exceeds container %.3f s", secs, dur);
+    CHECK(fabs(media - dur) < 1e-9, "audio_load media %.3f s vs container %.3f s", media, dur);
 
     if (words_transcribe(MODEL, pcm, n, &w, &nw) != 0) {
         CHECK(0, "words_transcribe failed");

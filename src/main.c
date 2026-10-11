@@ -34,7 +34,7 @@ typedef struct {
     tok *tok;
     cp_clip *clips;
     int n_clips;
-    double transcribe_sec, select_sec;
+    double material_sec, transcribe_sec, select_sec;
 } state;
 
 static int usage(void)
@@ -181,7 +181,8 @@ static void print_text(const state *st)
 }
 
 /* ClipReport (ClipPipeline.swift:20-29) as JSONEncoder [.prettyPrinted, .sortedKeys] writes it.
- * Additions: Pick.sentenceIDs (the clip's sentence ids). Omitted: transcript, Pick.file (no cut). */
+ * Additions: Pick.sentenceIDs (the clip's sentence ids). Omitted: transcript, Pick.file (no cut).
+ * materialSec is the container duration, as the CLI reports it (talk.mp4: 94 s, audio track 92.15 s). */
 static void print_json(const args *a, const state *st)
 {
     printf("{\n  \"clips\" : [\n");
@@ -206,7 +207,7 @@ static void print_json(const args *a, const state *st)
     printf("  ],\n  \"cutSec\" : 0,\n  \"input\" : ");
     put_str(a->video);
     printf(",\n  \"materialSec\" : ");
-    put_num((double)st->n_pcm / AUDIO_RATE);
+    put_num(st->material_sec);
     printf(",\n  \"selectSec\" : ");
     put_num(st->select_sec);
     printf(",\n  \"sentences\" : %zu,\n  \"transcribeSec\" : ", st->n_sent);
@@ -218,11 +219,11 @@ static void print_json(const args *a, const state *st)
 static int run(const args *a, const paths *p, state *st)
 {
     double t0 = now();
-    if (audio_load(a->video, &st->pcm, &st->n_pcm)) {
+    if (audio_load(a->video, &st->pcm, &st->n_pcm, &st->material_sec)) {
         fprintf(stderr, "clips: cannot decode the audio of %s\n", a->video);
         return 1;
     }
-    fprintf(stderr, "clips: audio %.2f s\n", (double)st->n_pcm / AUDIO_RATE);
+    fprintf(stderr, "clips: audio %.2f s, media %.2f s\n", (double)st->n_pcm / AUDIO_RATE, st->material_sec);
     if (words_transcribe(p->whisper, st->pcm, st->n_pcm, &st->words, &st->n_words)) return 1;
     free(st->pcm);
     st->pcm = NULL;

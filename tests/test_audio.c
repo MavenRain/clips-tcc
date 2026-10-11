@@ -24,7 +24,7 @@ static void onset(const char *path, double expected)
 {
     float *pcm = NULL;
     size_t n = 0, first = 0;
-    if (audio_load(path, &pcm, &n)) {
+    if (audio_load(path, &pcm, &n, NULL)) {
         fprintf(stderr, "FAIL: decoding %s\n", path);
         failed++;
         return;
@@ -47,7 +47,7 @@ static void gap(const char *path)
 {
     float *pcm = NULL;
     size_t n = 0, active = 0;
-    if (audio_load(path, &pcm, &n)) {
+    if (audio_load(path, &pcm, &n, NULL)) {
         fprintf(stderr, "FAIL: decoding %s\n", path);
         failed++;
         return;
@@ -62,6 +62,36 @@ static void gap(const char *path)
     }
     free(pcm);
 }
+
+/* Two 1 s tones back to back whose channel count or rate changes mid-stream; both must play in full. */
+static void joined(const char *path)
+{
+    float *pcm = NULL;
+    size_t n = 0, active = 0;
+    double media = -1;
+    if (audio_load(path, &pcm, &n, &media)) {
+        fprintf(stderr, "FAIL: decoding %s\n", path);
+        failed++;
+        return;
+    }
+    size_t lo = AUDIO_RATE * 13 / 10, hi = AUDIO_RATE * 18 / 10;
+    for (size_t i = lo; i < hi && i < n; i++) active += fabsf(pcm[i]) > 0.01f;
+    printf("audio joined: %s %.3f s, %zu of %zu active samples in 1.3-1.8 s\n",
+           path, (double)n / AUDIO_RATE, active, hi - lo);
+    /* A 1 kHz tone at 16 kHz puts 2 of every 16 samples near a zero crossing. */
+    if (n < AUDIO_RATE * 19 / 10 || n > AUDIO_RATE * 9 / 4 || active < (hi - lo) * 3 / 4) {
+        fprintf(stderr, "FAIL: a mid-stream format change must not drop, speed up or crash audio\n");
+        failed++;
+    }
+    if (fabs(media - (double)n / AUDIO_RATE) > 1.0 / AUDIO_RATE) {
+        fprintf(stderr, "FAIL: raw AAC duration %.6f must use the decoded timeline %.6f\n",
+                media, (double)n / AUDIO_RATE);
+        failed++;
+    }
+    free(pcm);
+}
+
+#define TONE(rate, ch, out) FF "-f lavfi -i sine=frequency=1000:duration=1:sample_rate=" rate " -ac " ch " -c:a aac " out
 
 int main(void)
 {
@@ -83,6 +113,17 @@ int main(void)
                   "-map 0:v -map 1:a -af \"aselect='not(between(t,0.45,1.45))'\" "
                   "-c:v mpeg4 -c:a aac build/test-audio-resample-gap.mp4"))
         gap("build/test-audio-resample-gap.mp4");
-    printf("test_audio: 4 scenarios, %d failed\n", failed);
+    /* Raw ADTS files concatenate as-is, so the decoder sees the new layout or rate mid-stream. */
+    if (!generate(TONE("44100", "2", "build/test-audio-stereo.aac"))
+        && !generate(TONE("44100", "1", "build/test-audio-mono.aac"))
+        && !generate(TONE("22050", "2", "build/test-audio-low.aac"))
+        && !generate("cat build/test-audio-stereo.aac build/test-audio-mono.aac > build/test-audio-layout.aac")
+        && !generate("cat build/test-audio-stereo.aac build/test-audio-low.aac > build/test-audio-rate.aac")) {
+        joined("build/test-audio-layout.aac");
+        joined("build/test-audio-rate.aac");
+        if (!generate("cat build/test-audio-low.aac build/test-audio-stereo.aac > build/test-audio-rate-up.aac"))
+            joined("build/test-audio-rate-up.aac");
+    }
+    printf("test_audio: 7 scenarios, %d failed\n", failed);
     return failed ? 1 : 0;
 }

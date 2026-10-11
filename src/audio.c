@@ -24,6 +24,8 @@ typedef struct {
     AVCodecContext *dec;
     AVFrame *fr;
     SwrContext *swr;
+    AVChannelLayout in_layout; /* input side of swr: a frame that differs rebuilds it */
+    int in_rate, in_format;
     AVRational time_base;
     int64_t origin_samples;
     fbuf out;
@@ -41,10 +43,14 @@ static int fbuf_reserve(fbuf *b, size_t extra)
     return 0;
 }
 
-/* Build the resampler from the first decoded frame (its layout, format and rate are authoritative). */
+/* Build the resampler for frame f (its layout, format and rate are authoritative). */
 static int swr_open(dstate *d, const AVFrame *f)
 {
     AVChannelLayout mono, in;
+    av_channel_layout_uninit(&d->in_layout);
+    if (av_channel_layout_copy(&d->in_layout, &f->ch_layout) < 0) return -1;
+    d->in_rate = f->sample_rate;
+    d->in_format = f->format;
     av_channel_layout_default(&mono, 1);
     if (f->ch_layout.order == AV_CHANNEL_ORDER_UNSPEC) av_channel_layout_default(&in, f->ch_layout.nb_channels);
     else if (av_channel_layout_copy(&in, &f->ch_layout) < 0) return -1;
@@ -70,34 +76,44 @@ static int resample(dstate *d, const AVFrame *f)
     return got;
 }
 
+/* True when f's layout, format or rate differs from the input the resampler was built for. */
+static int input_changed(const dstate *d, const AVFrame *f)
+{
+    return f->sample_rate != d->in_rate || f->format != d->in_format
+        || av_channel_layout_compare(&f->ch_layout, &d->in_layout) != 0;
+}
+
+/* Flush the resampler, pad d->out with silence up to sample at (if later), and rebuild it for f. */
+static int swr_restart(dstate *d, const AVFrame *f, int64_t at)
+{
+    int flushed;
+    while ((flushed = resample(d, NULL)) > 0) {}
+    if (flushed < 0) return -1;
+    if (at > (int64_t)d->out.n) {
+        size_t gap = (size_t)(at - (int64_t)d->out.n);
+        if (fbuf_reserve(&d->out, gap) < 0) return -1;
+        memset(d->out.p + d->out.n, 0, gap * sizeof *d->out.p);
+        d->out.n += gap;
+    }
+    swr_free(&d->swr);
+    return swr_open(d, f);
+}
+
 /* Receive every ready frame and resample it. Returns 0 at EAGAIN or EOF, -1 on error. */
 static int drain(dstate *d)
 {
     int r;
     while ((r = avcodec_receive_frame(d->dec, d->fr)) >= 0) {
-        int e = 0;
-        if (!d->swr && swr_open(d, d->fr) < 0) e = -1;
+        int e = d->swr ? 0 : swr_open(d, d->fr);
+        int64_t at = -1;
         if (e == 0 && d->fr->best_effort_timestamp != AV_NOPTS_VALUE) {
-            int64_t at = av_rescale_q(d->fr->best_effort_timestamp, d->time_base,
-                                      (AVRational){1, AUDIO_RATE}) - d->origin_samples;
-            int64_t pending = swr_get_delay(d->swr, AUDIO_RATE);
+            int64_t t = av_rescale_q(d->fr->best_effort_timestamp, d->time_base,
+                                     (AVRational){1, AUDIO_RATE}) - d->origin_samples;
             /* Allow two samples for timestamp and resampler rounding. */
-            if (at > 0 && at > (int64_t)d->out.n + pending + 2) {
-                int flushed;
-                while ((flushed = resample(d, NULL)) > 0) {}
-                if (flushed < 0) e = -1;
-                if (e == 0 && at > (int64_t)d->out.n) {
-                    size_t gap = (size_t)(at - (int64_t)d->out.n);
-                    if (fbuf_reserve(&d->out, gap) < 0) e = -1;
-                    else {
-                        memset(d->out.p + d->out.n, 0, gap * sizeof *d->out.p);
-                        d->out.n += gap;
-                    }
-                }
-                swr_free(&d->swr);
-                if (e == 0 && swr_open(d, d->fr) < 0) e = -1;
-            }
+            if (t > 0 && t > (int64_t)d->out.n + swr_get_delay(d->swr, AUDIO_RATE) + 2) at = t;
         }
+        /* A gap pads with silence; a new layout, format or rate (ADTS, TS) needs a new resampler. */
+        if (e == 0 && (at >= 0 || input_changed(d, d->fr))) e = swr_restart(d, d->fr, at);
         if (e == 0) e = resample(d, d->fr);
         av_frame_unref(d->fr);
         if (e < 0) return -1;
@@ -151,21 +167,29 @@ static const char *decode_all(AVFormatContext *fmt, int si, dstate *d)
     return r < 0 ? "resampler flush failed" : NULL;
 }
 
-int audio_load(const char *path, float **pcm, size_t *n)
+int audio_load(const char *path, float **pcm, size_t *n, double *media_sec)
 {
     AVFormatContext *fmt = NULL;
     dstate d = {0};
     const char *err = NULL;
+    double media = -1;
     int si;
 
     *pcm = NULL;
     *n = 0;
+    if (media_sec) *media_sec = 0;
     av_log_set_level(AV_LOG_ERROR);
     if (avformat_open_input(&fmt, path, NULL, NULL) < 0) return fail(path, "cannot open");
+    /* Keep stored timestamps. Inferred raw-audio timestamps can use the initial sample rate
+     * after a rate change and would make drain() insert silence that is absent from the input. */
+    fmt->flags |= AVFMT_FLAG_NOFILLIN;
     if (avformat_find_stream_info(fmt, NULL) < 0) err = "no stream info";
     else if ((si = open_decoder(fmt, &d)) < 0) err = "no decodable audio stream";
     else if (!(d.fr = av_frame_alloc())) err = "out of memory";
     else {
+        /* The CLI's material length: the whole container, not the audio track. */
+        if (fmt->duration > 0 && fmt->duration_estimation_method != AVFMT_DURATION_FROM_BITRATE)
+            media = (double)fmt->duration / AV_TIME_BASE;
         d.time_base = fmt->streams[si]->time_base;
         d.origin_samples = fmt->start_time == AV_NOPTS_VALUE ? 0
             : av_rescale_q(fmt->start_time, (AVRational){1, AV_TIME_BASE},
@@ -175,6 +199,7 @@ int audio_load(const char *path, float **pcm, size_t *n)
 
     av_frame_free(&d.fr);
     swr_free(&d.swr);
+    av_channel_layout_uninit(&d.in_layout);
     avcodec_free_context(&d.dec);
     avformat_close_input(&fmt);
     if (err) {
@@ -183,5 +208,6 @@ int audio_load(const char *path, float **pcm, size_t *n)
     }
     *pcm = d.out.p;
     *n = d.out.n;
+    if (media_sec) *media_sec = media > 0 ? media : (double)d.out.n / AUDIO_RATE;
     return 0;
 }

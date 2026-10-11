@@ -119,6 +119,9 @@ static void m_tiny(uint8_t *b, size_t *n) { *n = 20; }
 /* Piece 6 "▁c" becomes "▁b": same total size, duplicate bytes. */
 static void m_dup(uint8_t *b, size_t *n) { b[*n - 1] = 'b'; }
 static void m_ok(uint8_t *b, size_t *n) { (void)b; (void)n; }
+/* Score of piece 4 ("▁a") becomes NaN or -inf. */
+static void m_nan(uint8_t *b, size_t *n) { put32(b + 21 + 4 * 4, 0x7FC00000u); }
+static void m_ninf(uint8_t *b, size_t *n) { put32(b + 21 + 4 * 4, 0xFF800000u); }
 
 static void synthetic(void) {
     tok *t = from_pieces(SYN, SYN_SC, 7);
@@ -155,6 +158,18 @@ static void synthetic(void) {
     check(tok_encode(t, "a b", 0, ids) == 0, "max_len 0 -> 0");
     check(tok_encode(t, "a b", -3, ids) == 0, "max_len < 0 -> 0");
     tok_free(t);
+
+    /* :278 Non-finite scores are rejected; finite scores below the old -1e18 floor still encode. */
+    check(rejects(m_nan), "NaN piece score rejected");
+    check(rejects(m_ninf), "-inf piece score rejected");
+    static const float deep_sc[] = {0, 0, 0, 0, -1e30f, -1e30f, -1e30f};
+    tok *deep = from_pieces(SYN, deep_sc, 7);
+    n = deep ? tok_encode(deep, "a b", 128, ids) : 0;
+    int valid = n > 0;
+    for (int i = 0; i < n; i++)
+        valid = valid && ids[i] >= 0;
+    check(valid, "scores of -1e30 encode with no id -1");
+    tok_free(deep);
 
     /* :183-186 */
     static const uint8_t five[] = {0x00, 0x01, 0x02, 0x03, 0x04};

@@ -2,6 +2,7 @@
  * The tok is read-only after load; tok_encode keeps all scratch on the heap per call. */
 #include "tokenizer.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -155,6 +156,8 @@ static tok *build(uint8_t *buf, size_t n) {
     for (size_t id = 0; id < c; id++) {
         size_t len = (size_t)ln[2 * id] | (size_t)ln[2 * id + 1] << 8;
         float s = rd_f32(sc + 4 * id);
+        if (!isfinite(s))
+            return reject(t, "non-finite piece score");
         if (len > n - base - pos)
             return reject(t, "piece runs past the end");
         t->scores[id] = s;
@@ -275,7 +278,7 @@ static void viterbi(const tok *t, const scratch *s, size_t n) {
     s->bpos[0] = -1;
     s->bid[0] = -1;
     for (size_t i = 1; i <= n; i++) {
-        double best = -1e18;
+        double best = -HUGE_VAL; /* any finite unk step beats it, so no id -1 */
         int32_t bp = -1, bi = -1;
         size_t lo = i > (size_t)t->max_len ? i - (size_t)t->max_len : 0;
         for (size_t j = lo; j < i; j++) {

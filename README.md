@@ -48,13 +48,13 @@ Run `build/clips` outside the sandbox. Core ML writes a model cache. Progress me
 
 `make check` runs six gates. Run them from the repository root, outside the sandbox. If `fixtures/talk.mp4` is absent, the first run makes it from `fixtures/talk.txt` with `say` and ffmpeg. The E2E gate compares `materialSec` with the container duration reported independently by ffprobe.
 
-The table records the S5 run on the original fixture. Speech synthesis and ASR can vary by machine, so regenerated fixtures can have different durations and sentence counts.
+The table records the S6 run on the original fixture. Speech synthesis and ASR can vary by machine, so regenerated fixtures can have different durations and sentence counts.
 
-| Gate | What it checks | Result at S5 |
+| Gate | What it checks | Result at S6 |
 | --- | --- | --- |
 | `check-coreml` | Model load, input widths and pinned outputs with units 3 | 14 passed, 0 failed |
 | `check-tokenizer` | The tokenizer | 50 passed, 0 failed |
-| `check-audio` | Decode timelines: delays, gaps, MPEG-TS and MP3 timestamps, AC3 layout copies and rate changes | 12 scenarios, 0 failed |
+| `check-audio` | Decode timelines: delays, gaps, MPEG-TS and MP3 timestamps, AC3 layout copies and rate changes | 14 scenarios, 0 failed |
 | `check-words` | Words and sentences of `fixtures/talk.mp4` | OK, 307 words, 38 sentences |
 | `check-pipeline` | Clip selection | 53 checks, 0 failed |
 | `check-e2e` | `build/clips fixtures/talk.mp4 --json` | 8 spans, 119 checks, 0 failed |

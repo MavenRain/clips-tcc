@@ -136,6 +136,7 @@ int main(void)
                   "-c:v mpeg4 -c:a aac build/test-audio-resample-gap.mp4"))
         gap("build/test-audio-resample-gap.mp4");
     /* MPEG-TS needs the fill-in for its start time, MP3 for its priming trim. */
+    /* The lengths 2.112 and 3.048 include the encoder priming of ffmpeg 9.0.2. */
     if (!generate(FF "-f lavfi -i sine=frequency=1000:duration=2:sample_rate=16000 "
                   "-c:a aac -output_ts_offset 10 -f mpegts build/test-audio-ts-offset.ts"))
         timeline("build/test-audio-ts-offset.ts", 0.064, 2.112);
@@ -150,6 +151,16 @@ int main(void)
     if (!generate(FF "-f lavfi -i sine=frequency=1000:duration=2:sample_rate=32000 "
                   "-c:a ac3 build/test-audio.ac3"))
         timeline("build/test-audio.ac3", 0.0, 2.016);
+    /* A rate change mid-stream rebuilds the resampler, so the AC3 layout copy runs a second time. */
+    if (!generate(FF "-f lavfi -i sine=frequency=1000:duration=1:sample_rate=32000 "
+                  "-c:a ac3 build/test-audio-ac3-low.ac3")
+        && !generate(FF "-f lavfi -i sine=frequency=1000:duration=1:sample_rate=48000 "
+                     "-c:a ac3 build/test-audio-ac3-high.ac3")
+        && !generate("cat build/test-audio-ac3-low.ac3 build/test-audio-ac3-high.ac3 "
+                     "> build/test-audio-ac3-rate-up.ac3")) {
+        joined("build/test-audio-ac3-rate-up.ac3", 1);
+        timeline("build/test-audio-ac3-rate-up.ac3", 0.0, 2.032);
+    }
     /* The second TS segment starts where the first ends. Its PES packets contain several AAC
      * frames, so parser fill-in must not use 22050 Hz for the new 44100 Hz frames. */
     if (!generate(FF "-f lavfi -i sine=frequency=1000:duration=1:sample_rate=22050 "
@@ -165,10 +176,10 @@ int main(void)
         && !generate("cat build/test-audio-stereo.aac build/test-audio-mono.aac > build/test-audio-layout.aac")
         && !generate("cat build/test-audio-stereo.aac build/test-audio-low.aac > build/test-audio-rate.aac")) {
         joined("build/test-audio-layout.aac", 1);
-            joined("build/test-audio-rate.aac", 1);
+        joined("build/test-audio-rate.aac", 1);
         if (!generate("cat build/test-audio-low.aac build/test-audio-stereo.aac > build/test-audio-rate-up.aac"))
             joined("build/test-audio-rate-up.aac", 1);
     }
-    printf("test_audio: 12 scenarios, %d failed\n", failed);
+    printf("test_audio: 14 scenarios, %d failed\n", failed);
     return failed ? 1 : 0;
 }

@@ -161,8 +161,11 @@ int main(void)
         joined("build/test-audio-ac3-rate-up.ac3", 1);
         timeline("build/test-audio-ac3-rate-up.ac3", 0.0, 2.032);
     }
-    /* The second TS segment starts where the first ends. Its PES packets contain several AAC
-     * frames, so parser fill-in must not use 22050 Hz for the new 44100 Hz frames. */
+    /* The second TS segment starts where the first ends. The offset 1.091337 s is
+     * 23 * 1024 / 22050 + 1024 / 44100, cut to 6 decimals: 23 AAC frames at 22050 Hz plus one
+     * priming frame of 1024 samples at 44100 Hz, because that priming frame is the first packet
+     * of the second segment. The PES packets of the second segment contain several AAC frames,
+     * so parser fill-in must not use 22050 Hz for the new 44100 Hz frames. */
     if (!generate(FF "-f lavfi -i sine=frequency=1000:duration=1:sample_rate=22050 "
                   "-c:a aac -f mpegts build/test-audio-ts-low.ts")
         && !generate(FF "-f lavfi -i sine=frequency=1000:duration=1:sample_rate=44100 "
